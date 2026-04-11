@@ -1,9 +1,11 @@
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 import io
+import base64
 
-# Setup minimalist page config
+# ====================== PAGE CONFIG ======================
 st.set_page_config(
     page_title="Data Explorer Studio",
     page_icon="📊",
@@ -11,171 +13,314 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Apply some custom minimal CSS using st.markdown
+# ====================== CUSTOM STYLING ======================
 STYLING = """
 <style>
-    .css-18e3th9 {
-        padding-top: 1rem;
-    }
-    .st-emotion-cache-1y4p8pa {
-        padding-top: 2rem;
-    }
-    h1, h2, h3 {
-        font-family: 'Inter', sans-serif;
-        color: #1E293B;
-    }
-    .stDataFrame {
-        border-radius: 8px;
-    }
+    .css-18e3th9 { padding-top: 1rem; }
+    .st-emotion-cache-1y4p8pa { padding-top: 2rem; }
+    h1, h2, h3 { font-family: 'Inter', sans-serif; color: #1E293B; }
+    .stDataFrame { border-radius: 8px; }
+    .reportview-container .main .block-container { padding-top: 2rem; }
 </style>
 """
 st.markdown(STYLING, unsafe_allow_html=True)
 
 st.title("Data Explorer Studio 📊")
-st.markdown("A lightweight and interactive tool for quickly understanding and visualizing your datasets.")
+st.markdown("**Professional • Interactive • Future-Proof** — Your all-in-one data analysis workbench.")
 
-# Sidebar for controls
-st.sidebar.header("1. Upload Data")
-uploaded_file = st.sidebar.file_uploader(
-    "Choose a CSV or Excel file", 
-    type=['csv', 'xlsx', 'xls']
-)
+# ====================== THEME TOGGLE ======================
+if "theme" not in st.session_state:
+    st.session_state.theme = "light"
+
+if st.sidebar.button("🌗 Toggle Dark/Light Theme"):
+    st.session_state.theme = "dark" if st.session_state.theme == "light" else "light"
+    st.rerun()
+
+# ====================== SAMPLE DATASETS ======================
+SAMPLE_DATASETS = {
+    "Iris (Classic)": "https://raw.githubusercontent.com/mwaskom/seaborn-data/master/iris.csv",
+    "Titanic": "https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv",
+    "Tips (Restaurant)": "https://raw.githubusercontent.com/mwaskom/seaborn-data/master/tips.csv",
+    "Penguins": "https://raw.githubusercontent.com/mwaskom/seaborn-data/master/penguins.csv",
+    "Cars (mtcars)": "https://raw.githubusercontent.com/mwaskom/seaborn-data/master/mtcars.csv"
+}
+
+# ====================== SIDEBAR ======================
+st.sidebar.header("📂 1. Load Data")
+
+# Sample dataset selector
+use_sample = st.sidebar.checkbox("Use Sample Dataset instead of upload")
+if use_sample:
+    dataset_name = st.sidebar.selectbox("Choose Sample Dataset", options=list(SAMPLE_DATASETS.keys()))
+    if st.sidebar.button("🚀 Load Sample"):
+        with st.spinner(f"Loading {dataset_name}..."):
+            df_sample = pd.read_csv(SAMPLE_DATASETS[dataset_name])
+            st.session_state.data = df_sample.copy()
+            st.session_state.file_name = dataset_name + ".csv"
+            st.sidebar.success(f"✅ {dataset_name} loaded!")
+            st.rerun()
+else:
+    uploaded_file = st.sidebar.file_uploader(
+        "Upload CSV or Excel", 
+        type=['csv', 'xlsx', 'xls']
+    )
 
 @st.cache_data
-def load_data(file_bytes, file_name):
-    # Using file bytes and name to cache successfully independent of the UploadedFile object state
+def load_data(file_bytes: bytes, file_name: str) -> pd.DataFrame | str:
     try:
-        if file_name.endswith('.csv'):
+        if file_name.lower().endswith('.csv'):
             df = pd.read_csv(io.BytesIO(file_bytes))
         else:
             df = pd.read_excel(io.BytesIO(file_bytes))
         return df
     except Exception as e:
-        return str(e)
+        return f"Error: {str(e)}"
 
+# ====================== MAIN LOGIC ======================
+if 'data' not in st.session_state:
+    st.session_state.data = None
+    st.session_state.file_name = None
 
-if uploaded_file is not None:
-    # Load and cache raw data efficiently
-    with st.spinner("Loading data..."):
+# Load uploaded file
+if not use_sample and uploaded_file is not None and st.session_state.data is None:
+    with st.spinner("Loading your file..."):
         file_bytes = uploaded_file.getvalue()
-        raw_data = load_data(file_bytes, uploaded_file.name)
-        
-    if isinstance(raw_data, str):
-        st.error(f"Error loading file: {raw_data}")
-    else:
-        st.sidebar.success("File successfully loaded!")
-        
-        # Initialize session state for mutable data frame
-        if 'file_name' not in st.session_state or st.session_state.file_name != uploaded_file.name:
-            st.session_state.data = raw_data.copy()
+        result = load_data(file_bytes, uploaded_file.name)
+        if isinstance(result, str):
+            st.error(result)
+        else:
+            st.session_state.data = result.copy()
             st.session_state.file_name = uploaded_file.name
-        
-        # We work with the session_state copy so the user can wipe/clean iteratively
-        data = st.session_state.data
-        
-        # Tools in sidebar for basic cleaning
-        st.sidebar.header("2. Quick Cleaning")
-        if st.sidebar.button("Remove Duplicate Rows"):
-            st.session_state.data = st.session_state.data.drop_duplicates()
+            st.sidebar.success("✅ File loaded successfully!")
+
+data = st.session_state.data
+
+if data is not None:
+    st.sidebar.success(f"✅ Working with: **{st.session_state.file_name}**")
+    
+    # Show file metadata
+    st.sidebar.markdown(f"**Rows:** {data.shape[0]:,} | **Columns:** {data.shape[1]}")
+    
+    # ====================== CLEANING & TRANSFORMATION ======================
+    st.sidebar.header("🧼 2. Clean & Transform")
+    
+    # Drop duplicates
+    if st.sidebar.button("🧹 Remove Duplicates"):
+        st.session_state.data = st.session_state.data.drop_duplicates().reset_index(drop=True)
+        st.rerun()
+    
+    # Drop columns
+    if st.sidebar.checkbox("Drop Columns"):
+        cols_to_drop = st.sidebar.multiselect("Select columns to drop", options=data.columns)
+        if cols_to_drop and st.sidebar.button("❌ Drop Selected Columns"):
+            st.session_state.data = st.session_state.data.drop(columns=cols_to_drop).reset_index(drop=True)
             st.rerun()
-            
-        drop_na_col = st.sidebar.selectbox("Select column to check missing values (Optional)", options=["None"] + list(data.columns))
-        if drop_na_col != "None":
-            if st.sidebar.button(f"Drop Missing in '{drop_na_col}'"):
-                st.session_state.data = st.session_state.data.dropna(subset=[drop_na_col])
-                st.rerun()
-                
-        if st.sidebar.button("Reset All Changes"):
-            st.session_state.data = raw_data.copy()
-            st.rerun()
-
-        # Main Workspace - Using Tabs for a clean, minimalist layout
-        tab1, tab2, tab3 = st.tabs(["📋 Data Overview", "📈 Visualizations", "💡 Summary Stats"])
+    
+    # Missing value handling
+    if st.sidebar.checkbox("Handle Missing Values"):
+        col_for_na = st.sidebar.selectbox("Column", options=["All Columns"] + list(data.columns))
+        method = st.sidebar.selectbox("Method", ["Drop Rows", "Fill with Mean", "Fill with Median", "Fill with Mode", "Fill with 0"])
         
-        with tab1:
-            st.subheader("Data Preview")
-            if data.empty:
-                st.warning("The dataset is currently empty (perhaps all rows were dropped).")
+        if st.sidebar.button("Apply Missing Value Fix"):
+            if col_for_na == "All Columns":
+                if method == "Drop Rows":
+                    st.session_state.data = st.session_state.data.dropna().reset_index(drop=True)
+                elif method == "Fill with Mean":
+                    st.session_state.data = st.session_state.data.fillna(data.mean(numeric_only=True))
+                elif method == "Fill with Median":
+                    st.session_state.data = st.session_state.data.fillna(data.median(numeric_only=True))
+                elif method == "Fill with Mode":
+                    st.session_state.data = st.session_state.data.fillna(data.mode().iloc[0])
+                elif method == "Fill with 0":
+                    st.session_state.data = st.session_state.data.fillna(0)
             else:
-                st.markdown(f"**Shape:** {data.shape[0]} rows and {data.shape[1]} columns")
-                # Show a limited number of rows by default to keep the UI clean
-                max_rows = max(10, min(1000, data.shape[0]))
-                rows_to_show = st.slider("Number of rows to display", min_value=1, max_value=max_rows, value=min(10, data.shape[0]))
-                st.dataframe(data.head(rows_to_show), use_container_width=True)
-                
-                with st.expander("Show Column Data Types"):
-                    st.dataframe(data.dtypes.astype(str).reset_index().rename(columns={'index': 'Column', 0: 'Type'}), use_container_width=True, hide_index=True)
-
-        with tab2:
-            st.subheader("Chart Builder")
-            st.markdown("Select variables to uncover insights.")
-            
-            if data.empty:
-                st.info("No data available to plot.")
-            else:
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    plot_type = st.selectbox("Select Chart Type", ["Scatter Plot", "Line Chart", "Bar Chart", "Histogram", "Box Plot"])
-                with col2:
-                    x_axis = st.selectbox("X-Axis Variable", options=data.columns, index=0)
-                with col3:
-                    # Add a 'None' option for Y-axis for plots like histograms
-                    y_options = ["None"] + list(data.columns)
-                    # Select the second column for Y axis (index 2 in y_options array) if there is more than 1 column. 
-                    default_y_index = 2 if len(data.columns) > 1 else 1 
-                    y_axis = st.selectbox("Y-Axis Variable", options=y_options, index=default_y_index)
-                    
-                color_by = st.selectbox("Color By (Optional)", options=["None"] + list(data.columns))
-                
-                # Generate Plotly Chart
-                try:
-                    color_arg = color_by if color_by != "None" else None
-                    y_arg = y_axis if y_axis != "None" else None
-                    
-                    if plot_type == "Scatter Plot" and y_arg:
-                        fig = px.scatter(data, x=x_axis, y=y_arg, color=color_arg, template="plotly_white")
-                    elif plot_type == "Line Chart" and y_arg:
-                        fig = px.line(data, x=x_axis, y=y_arg, color=color_arg, template="plotly_white")
-                    elif plot_type == "Bar Chart" and y_arg:
-                        fig = px.bar(data, x=x_axis, y=y_arg, color=color_arg, template="plotly_white")
-                    elif plot_type == "Histogram":
-                        fig = px.histogram(data, x=x_axis, color=color_arg, template="plotly_white")
-                    elif plot_type == "Box Plot" and y_arg:
-                        fig = px.box(data, x=x_axis, y=y_arg, color=color_arg, template="plotly_white")
-                    else:
-                        st.warning("Please select a Y-Axis variable for this chart type.")
-                        fig = None
-                        
-                    if fig:
-                        fig.update_layout(
-                            margin=dict(l=20, r=20, t=30, b=20),
-                            paper_bgcolor="rgba(0,0,0,0)",
-                            plot_bgcolor="rgba(0,0,0,0)",
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                except Exception as e:
-                    st.error(f"Could not generate plot. Note that plot type mapping expects certain datatypes. Error detail: {e}")
-
-        with tab3:
-            st.subheader("Statistical Summary")
-            if data.empty:
-                st.info("No data available to summarize.")
-            else:
-                st.markdown("Descriptive statistics for numerical columns.")
-                # We use try/except as describe can fail on purely categorical data if not handled
-                try:
-                    st.dataframe(data.describe().T, use_container_width=True)
-                except Exception:
-                    st.info("No numerical columns found to describe.")
-                
-                st.subheader("Missing Values")
-                missing_data = data.isnull().sum().reset_index().rename(columns={'index': 'Column', 0: 'Missing Values'})
-                missing_data = missing_data[missing_data['Missing Values'] > 0]
-                if missing_data.empty:
-                    st.success("No missing values found in the dataset! 🎉")
+                if method == "Drop Rows":
+                    st.session_state.data = st.session_state.data.dropna(subset=[col_for_na]).reset_index(drop=True)
+                elif method == "Fill with Mean" and pd.api.types.is_numeric_dtype(data[col_for_na]):
+                    st.session_state.data[col_for_na] = st.session_state.data[col_for_na].fillna(data[col_for_na].mean())
+                elif method == "Fill with Median" and pd.api.types.is_numeric_dtype(data[col_for_na]):
+                    st.session_state.data[col_for_na] = st.session_state.data[col_for_na].fillna(data[col_for_na].median())
+                elif method == "Fill with Mode":
+                    st.session_state.data[col_for_na] = st.session_state.data[col_for_na].fillna(data[col_for_na].mode().iloc[0])
+                elif method == "Fill with 0":
+                    st.session_state.data[col_for_na] = st.session_state.data[col_for_na].fillna(0)
+            st.rerun()
+    
+    # Column rename & type conversion
+    if st.sidebar.checkbox("Rename Columns / Change Types"):
+        col_to_edit = st.sidebar.selectbox("Column to edit", options=data.columns)
+        new_name = st.sidebar.text_input("New Column Name", value=col_to_edit)
+        if new_name and new_name != col_to_edit and st.sidebar.button("Rename"):
+            st.session_state.data = st.session_state.data.rename(columns={col_to_edit: new_name})
+            st.rerun()
+        
+        new_type = st.sidebar.selectbox("Convert to", ["int", "float", "string", "datetime", "category"])
+        if st.sidebar.button("Convert Type"):
+            try:
+                if new_type == "datetime":
+                    st.session_state.data[col_to_edit] = pd.to_datetime(st.session_state.data[col_to_edit])
                 else:
-                    st.dataframe(missing_data, use_container_width=True, hide_index=True)
-
+                    st.session_state.data[col_to_edit] = st.session_state.data[col_to_edit].astype(new_type)
+                st.rerun()
+            except Exception as e:
+                st.sidebar.error(f"Conversion failed: {e}")
+    
+    # Data Filter (multiple conditions possible)
+    st.sidebar.header("🔎 3. Filter Data")
+    if st.sidebar.checkbox("Enable Advanced Filter"):
+        filter_col = st.sidebar.selectbox("Filter Column", options=data.columns)
+        operator = st.sidebar.selectbox("Operator", ["==", ">", "<", ">=", "<=", "!=", "contains"])
+        value = st.sidebar.text_input("Value")
+        
+        if st.sidebar.button("Apply Filter"):
+            try:
+                if operator == "==":
+                    st.session_state.data = st.session_state.data[st.session_state.data[filter_col] == value]
+                elif operator == ">":
+                    st.session_state.data = st.session_state.data[st.session_state.data[filter_col] > float(value)]
+                elif operator == "<":
+                    st.session_state.data = st.session_state.data[st.session_state.data[filter_col] < float(value)]
+                elif operator == ">=":
+                    st.session_state.data = st.session_state.data[st.session_state.data[filter_col] >= float(value)]
+                elif operator == "<=":
+                    st.session_state.data = st.session_state.data[st.session_state.data[filter_col] <= float(value)]
+                elif operator == "!=":
+                    st.session_state.data = st.session_state.data[st.session_state.data[filter_col] != value]
+                elif operator == "contains":
+                    st.session_state.data = st.session_state.data[st.session_state.data[filter_col].astype(str).str.contains(value, case=False)]
+                st.rerun()
+            except Exception as e:
+                st.sidebar.error(f"Filter error: {e}")
+    
+    if st.sidebar.button("🔄 Reset to Original"):
+        if use_sample:
+            st.session_state.data = pd.read_csv(SAMPLE_DATASETS[dataset_name]).copy()
+        else:
+            # Re-load original file (simple reset)
+            st.session_state.data = None
+            st.rerun()
+    
+    # ====================== EXPORT ======================
+    st.sidebar.header("💾 4. Export")
+    col1, col2 = st.sidebar.columns(2)
+    with col1:
+        if st.sidebar.button("📥 Cleaned CSV"):
+            csv = st.session_state.data.to_csv(index=False).encode()
+            st.sidebar.download_button("Download CSV", csv, f"cleaned_{st.session_state.file_name}.csv", "text/csv")
+    with col2:
+        if st.sidebar.button("📄 Full HTML Report"):
+            html = st.session_state.data.to_html()
+            b64 = base64.b64encode(html.encode()).decode()
+            href = f'data:text/html;base64,{b64}'
+            st.sidebar.markdown(f'<a href="{href}" download="data_report.html" target="_blank">Download Report</a>', unsafe_allow_html=True)
+    
+    # ====================== TABS ======================
+    tab1, tab2, tab3, tab4 = st.tabs(["📋 Overview", "📈 Visualizations", "💡 Summary", "🔍 Insights"])
+    
+    # TAB 1: Overview
+    with tab1:
+        st.subheader("Data Preview")
+        if data.empty:
+            st.warning("Dataset is empty.")
+        else:
+            st.markdown(f"**Shape:** {data.shape[0]:,} rows × {data.shape[1]} columns")
+            rows_to_show = st.slider("Rows to display", 5, min(500, len(data)), 10)
+            st.dataframe(data.head(rows_to_show), use_container_width=True)
+            
+            with st.expander("Column Info"):
+                info = pd.DataFrame({
+                    "Column": data.columns,
+                    "Dtype": data.dtypes.astype(str),
+                    "Unique": data.nunique(),
+                    "Missing": data.isnull().sum(),
+                    "Min": data.min(numeric_only=True),
+                    "Max": data.max(numeric_only=True)
+                })
+                st.dataframe(info, use_container_width=True, hide_index=True)
+    
+    # TAB 2: Visualizations
+    with tab2:
+        st.subheader("Interactive Chart Builder")
+        if data.empty:
+            st.info("No data to plot.")
+        else:
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                plot_type = st.selectbox("Chart Type", ["Scatter", "Line", "Bar", "Histogram", "Box", "Violin"])
+            with c2:
+                x = st.selectbox("X Axis", data.columns, index=0)
+            with c3:
+                y_options = ["None"] + list(data.columns)
+                y = st.selectbox("Y Axis", y_options, index=2 if len(data.columns)>1 else 1)
+            
+            color = st.selectbox("Color By", ["None"] + list(data.columns))
+            color_arg = color if color != "None" else None
+            y_arg = y if y != "None" else None
+            
+            try:
+                if plot_type == "Scatter" and y_arg:
+                    fig = px.scatter(data, x=x, y=y_arg, color=color_arg, template="plotly_white")
+                elif plot_type == "Line" and y_arg:
+                    fig = px.line(data, x=x, y=y_arg, color=color_arg, template="plotly_white")
+                elif plot_type == "Bar" and y_arg:
+                    fig = px.bar(data, x=x, y=y_arg, color=color_arg, template="plotly_white")
+                elif plot_type == "Histogram":
+                    fig = px.histogram(data, x=x, color=color_arg, template="plotly_white")
+                elif plot_type == "Box" and y_arg:
+                    fig = px.box(data, x=x, y=y_arg, color=color_arg, template="plotly_white")
+                elif plot_type == "Violin" and y_arg:
+                    fig = px.violin(data, x=x, y=y_arg, color=color_arg, template="plotly_white")
+                else:
+                    fig = None
+                
+                if fig:
+                    fig.update_layout(margin=dict(l=20,r=20,t=40,b=20), title=f"{plot_type} Plot")
+                    st.plotly_chart(fig, use_container_width=True)
+            except Exception as e:
+                st.error(f"Plot error: {e}")
+    
+    # TAB 3: Summary
+    with tab3:
+        st.subheader("Statistical Summary")
+        if not data.empty:
+            st.dataframe(data.describe().T, use_container_width=True)
+            
+            st.subheader("Missing Values")
+            missing = data.isnull().sum().reset_index()
+            missing.columns = ["Column", "Count"]
+            missing = missing[missing["Count"] > 0]
+            if missing.empty:
+                st.success("✅ No missing values!")
+            else:
+                st.dataframe(missing, use_container_width=True, hide_index=True)
+    
+    # TAB 4: Insights (NEW)
+    with tab4:
+        st.subheader("Advanced Insights")
+        if data.empty:
+            st.info("No data.")
+        else:
+            # Correlation Heatmap
+            st.markdown("**Correlation Heatmap** (Numerical Columns)")
+            num_cols = data.select_dtypes(include=["number"]).columns
+            if len(num_cols) > 1:
+                corr = data[num_cols].corr()
+                fig_heat = px.imshow(corr, text_auto=True, aspect="auto", color_continuous_scale="RdBu")
+                st.plotly_chart(fig_heat, use_container_width=True)
+            else:
+                st.info("Need at least 2 numeric columns for correlation.")
+            
+            # Value Counts Explorer
+            st.subheader("Value Counts Explorer")
+            cat_col = st.selectbox("Select Column", options=data.columns, key="valuecount")
+            if st.button("Show Top 15 Values"):
+                vc = data[cat_col].value_counts().head(15).reset_index()
+                vc.columns = [cat_col, "Count"]
+                st.dataframe(vc, use_container_width=True)
+                fig_vc = px.bar(vc, x=cat_col, y="Count", title=f"Top values in {cat_col}")
+                st.plotly_chart(fig_vc, use_container_width=True)
+    
 else:
-    # Minimalist empty state
-    st.info("👈 Please upload a CSV or Excel file from the sidebar to get started.")
+    st.info("👈 Upload a file **or** enable Sample Dataset in the sidebar to begin exploring!")
+
+st.caption("Data Explorer Studio v2 • Built with ❤️ for powerful, instant data analysis")
